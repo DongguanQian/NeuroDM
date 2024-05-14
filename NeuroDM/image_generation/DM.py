@@ -85,7 +85,7 @@ class LayerNorm(nn.Module):
         return (x - mean) / (var + self.eps).sqrt() * self.g + self.b
 
 
-class ConvNextBlock(nn.Module):
+class NeuroBlock(nn.Module):
     def __init__(self, dim, dim_out, *, time_emb_dim=None, mult=2, norm=True):
         super().__init__()
 
@@ -203,23 +203,23 @@ class Unet(nn.Module):
             is_last = ind >= (num_resolutions - 1)
 
             self.downs.append(nn.ModuleList([
-                ConvNextBlock(dim_in, dim_out, time_emb_dim=time_dim, norm=ind != 0),
-                ConvNextBlock(dim_out, dim_out, time_emb_dim=time_dim),
+                NeuroBlock(dim_in, dim_out, time_emb_dim=time_dim, norm=ind != 0),
+                NeuroBlock(dim_out, dim_out, time_emb_dim=time_dim),
                 Residual(PreNorm(dim_out, LinearAttention(dim_out))),
                 Downsample(dim_out) if not is_last else nn.Identity()
             ]))
 
         mid_dim = dims[-1]
-        self.mid_block1 = ConvNextBlock(mid_dim, mid_dim, time_emb_dim=time_dim)
+        self.mid_block1 = NeuroBlock(mid_dim, mid_dim, time_emb_dim=time_dim)
         self.mid_attn = Residual(PreNorm(mid_dim, Attention(mid_dim)))
-        self.mid_block2 = ConvNextBlock(mid_dim, mid_dim, time_emb_dim=time_dim)
+        self.mid_block2 = NeuroBlock(mid_dim, mid_dim, time_emb_dim=time_dim)
 
         for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
             is_last = ind >= (num_resolutions - 1)
 
             self.ups.append(nn.ModuleList([
-                ConvNextBlock(dim_out * 2, dim_in, time_emb_dim=time_dim),
-                ConvNextBlock(dim_in, dim_in, time_emb_dim=time_dim),
+                NeuroBlock(dim_out * 2, dim_in, time_emb_dim=time_dim),
+                NeuroBlock(dim_in, dim_in, time_emb_dim=time_dim),
                 Residual(PreNorm(dim_in, LinearAttention(dim_in))),
                 Upsample(dim_in) if not is_last else nn.Identity()
             ]))
@@ -227,7 +227,7 @@ class Unet(nn.Module):
         out_dim = default(out_dim, channels)
         self.final_conv = nn.Sequential(
             StarReLU(),
-            ConvNextBlock(dim, out_dim)
+            NeuroBlock(dim, out_dim)
         )
         self.eeg_emb = nn.Linear(512, time_dim)
 
@@ -242,9 +242,9 @@ class Unet(nn.Module):
         if label is not None:
             t = t + self.eeg_emb(label)
 
-        for convnext, convnext2, attn, downsample in self.downs:
-            x = convnext(x, t)
-            x = convnext2(x, t)
+        for neuroblock, neuroblock2, attn, downsample in self.downs:
+            x = neuroblock(x, t)
+            x = neuroblock2(x, t)
             x = attn(x)
             h.append(x)
             x = downsample(x)
@@ -253,10 +253,10 @@ class Unet(nn.Module):
         x = self.mid_attn(x)
         x = self.mid_block2(x, t)
 
-        for convnext, convnext2, attn, upsample in self.ups:
+        for neuroblock, neuroblock2, attn, upsample in self.ups:
             x = torch.cat((x, h.pop()), dim=1)
-            x = convnext(x, t)
-            x = convnext2(x, t)
+            x = neuroblock(x, t)
+            x = neuroblock2(x, t)
             x = attn(x)
             x = upsample(x)
 
